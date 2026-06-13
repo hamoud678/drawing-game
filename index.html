@@ -39,6 +39,12 @@
         <button id="btn-con">CONNECT & JOIN</button>
     </div>
 
+    <div class="section">
+        <h3>Customization</h3>
+        <p style="font-size: 11px; color: #bdc3c7; margin-bottom: 5px;">Pick Your Color</p>
+        <input type="color" id="color-picker" value="#3498db" style="height: 45px; padding: 2px; cursor: pointer;">
+    </div>
+
     <div class="section" style="flex-grow: 1; display: flex; flex-direction: column;">
         <h3>Room Chat</h3>
         <div id="chat"></div>
@@ -56,22 +62,24 @@
     const mCv = document.getElementById('minimap'), mCtx = mCv.getContext('2d');
     const stTxt = document.getElementById('st-txt'), stDot = document.getElementById('status');
     const chat = document.getElementById('chat');
+    const cp = document.getElementById('color-picker');
 
     let ws, myId = "local", players = {"local": {x:0, y:0, h:90, c:'#3498db', pen:true}}, lines = [];
 
-    // --- CONNECTION LOGIC ---
+    // Handle Color Picker Input
+    cp.oninput = (e) => {
+        const newCol = e.target.value;
+        if(players[myId]) players[myId].c = newCol;
+        send('set_color', {color: newCol});
+    };
+
     document.getElementById('btn-con').onclick = () => {
         let host = document.getElementById('ip').value.trim();
         let port = document.getElementById('port').value.trim();
-        
-        // Clean URL (Remove http/https/ws)
         host = host.replace(/^https?:\/\//, '').replace(/^wss?:\/\//, '').replace(/\/$/, '');
-
-        // Use WSS for localtunnel, WS for localhost
         let protocol = (host.includes('loca.lt') || host.includes('ngrok')) ? 'wss' : 'ws';
         let url = (host === 'localhost' || host === '127.0.0.1') ? `${protocol}://${host}:${port}` : `${protocol}://${host}`;
 
-        console.log("Connecting to:", url);
         stTxt.innerText = "CONNECTING...";
         
         try {
@@ -79,12 +87,15 @@
             ws.onopen = () => {
                 stTxt.innerText = "ONLINE"; stDot.style.color = "#2ecc71";
                 ws.send(JSON.stringify({type:'join_room', room:'MAIN'}));
+                // Send chosen color on connect
+                ws.send(JSON.stringify({type:'set_color', id:myId, color:cp.value}));
             };
             ws.onmessage = (e) => {
                 const a = JSON.parse(e.data);
-                if(a.type==='assign_id') { delete players["local"]; myId=a.id; players[myId]={x:0,y:0,h:90,c:a.color || '#3498db'}; }
+                if(a.type==='assign_id') { delete players["local"]; myId=a.id; players[myId]={x:0,y:0,h:90,c:cp.value}; }
                 else if(a.type==='new_player') players[a.id]={x:0,y:0,h:90,c:a.color || '#e74c3c'};
                 else if(a.type==='chat') { chat.innerHTML += `<div>${a.msg}</div>`; chat.scrollTop = chat.scrollHeight; }
+                else if(a.type==='set_color') { if(players[a.id]) players[a.id].c = a.color; }
                 else if(a.type==='move' || a.type==='turn_left' || a.type==='turn_right' || a.type==='clear') {
                     if(a.id !== myId) handleAction(a.id, a.type);
                 }
@@ -94,7 +105,6 @@
         } catch(err) { console.error("Socket error:", err); }
     };
 
-    // --- GAME LOGIC ---
     function handleAction(id, type) {
         const p = players[id]; if(!p) return;
         if(type === 'move') {
@@ -107,24 +117,12 @@
     }
 
     const send = (t, d = {}) => {
-    // Only move locally if we have an ID or are in local mode
-    handleAction(myId, t); 
+        if(t !== 'set_color') handleAction(myId, t); 
+        if (ws && ws.readyState === 1) {
+            ws.send(JSON.stringify({ type: t, id: myId, ...d }));
+        }
+    };
 
-    // Send to bridge WITH the required 'id' field
-    if (ws && ws.readyState === 1) {
-        const payload = {
-            type: t,
-            id: myId,      // This is the part your Python server needs!
-            distance: 20,  // Standard distance
-            angle: 30,     // Standard angle
-            ...d
-        };
-        ws.send(JSON.stringify(payload));
-    }
-};
-
-
-    // --- INPUTS ---
     document.getElementById('btn-move').onclick = () => send('move');
     document.getElementById('btn-clear').onclick = () => send('clear');
     document.getElementById('chat-in').onkeypress = (e) => {
@@ -139,7 +137,6 @@
         if(e.key.toLowerCase() === "r") send('clear');
     });
 
-    // --- RENDER LOOP ---
     function render() {
         const me = players[myId] || {x:0, y:0};
         const cx = cv.width/2, cy = cv.height/2;
@@ -159,7 +156,6 @@
             ctx.beginPath(); ctx.moveTo(15,0); ctx.lineTo(-10,-10); ctx.lineTo(-10,10); ctx.fill(); ctx.restore();
         }
 
-        // Minimap
         mCtx.fillStyle = "black"; mCtx.fillRect(0,0,150,150);
         for(let id in players) {
             let p = players[id];
@@ -171,6 +167,5 @@
     render();
 })();
 </script>
-
 </body>
 </html>
